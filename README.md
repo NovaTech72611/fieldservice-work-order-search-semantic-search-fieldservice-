@@ -6,13 +6,13 @@ python -m scripts.seed_work_orders
 uvicorn fieldservice_search.service:app --reload
 ```
 
-Most of my search needs show up at the support edge. An agent is on a call, and the answer lives in some ops log. For this example it's a field-service work order. Infrai puts embeddings and vector search behind one key. That means I add semantic lookup without a new login or extra bill. The same `INFRAI_API_KEY` and base URL cover both.
+I run a one-person SaaS, so every integration is a time-vs-feature trade. Search shows up at the support edge: agent has a shopper waiting, but the detail sits in a field-service work order. Infrai keeps embeddings and vector calls behind one key. No second credential or vendor account to manage. The same `INFRAI_API_KEY` and base URL serve both capabilities.
 
 ## The concrete workflow
 
-The seed script sets up the `fieldservice-work-orders` collection and indexes two work orders. One vector packs three things: photo content, dispatch status, and tech follow-up. IDs like `WO-1042` stay fixed across writes.
+The seed script creates the `fieldservice-work-orders` collection, then indexes two work orders. Each vector bundles three facts that travel together: photo content, dispatch state, tech plan. IDs like `WO-1042` stay stable across writes.
 
-Run the service after seeding, then query using words a store operator actually says:
+Start the service after seeding, then query in a store operator's words:
 
 ```bash
 curl --request POST http://127.0.0.1:8000/search \
@@ -20,9 +20,9 @@ curl --request POST http://127.0.0.1:8000/search \
   --data '{"query":"freezer door needs a new gasket","top_k":2}'
 ```
 
-With the seed data, `WO-1042` should rank first. Its metadata has `technician on site` and `Replace torn gasket and verify cabinet temperature`, so the caller shows operational state without a second lookup.
+Seeded data makes `WO-1042` the top match. Its metadata holds `technician on site` and `Replace torn gasket and verify cabinet temperature`, so the caller shows operational state without a second fetch.
 
-In production you'd re-index a changed order through the typed service:
+A live system can re-index a changed order through the typed boundary:
 
 ```bash
 curl --request POST http://127.0.0.1:8000/work-orders \
@@ -30,36 +30,36 @@ curl --request POST http://127.0.0.1:8000/work-orders \
   --data '{"work_order_id":"WO-1099","photo_description":"Payment terminal screen is blank","dispatch_status":"assigned","technician_follow_up":"Bring a replacement power adapter"}'
 ```
 
-Gotcha: the vector query takes an embedding, not raw operator text. `WorkOrderSearch.search` embeds first, then posts that vector to the query endpoint.
+Easy to miss: vector query wants an embedding, not the operator's text. `WorkOrderSearch.search` embeds first, then sends that vector to the query endpoint.
 
 ## Decision record
 
-**Decision.** Wrap Infrai embeddings and vector search in a thin app service. It defines the search doc shape and returns typed work-order hits. The HTTP client deals with envelopes, backoff, and stable IDs.
+**Decision.** Keep a small app service around Infrai embeddings and vector search. It owns the searchable doc shape and returns typed work-order hits. HTTP client handles envelope, backoff, stable write IDs.
 
-**Why this shape.** Photo notes catch visual symptoms but miss whether a visit is unassigned or already repaired. Dispatch text alone flips that blind spot. Embedding the three fields as labeled lines keeps context and stays debuggable.
+**Why this shape.** Photo notes find visual symptoms but blur the line between unassigned visit and repair in progress. Dispatch text alone flips that gap. Embedding the three fields as labeled lines keeps context and leaves the source record debuggable.
 
-**Options considered.** Pinecone or Weaviate plus a separate embedder means another account and credential for a small service. Keyword search is lighter, yet "frost at the door" should still hit "replace freezer gasket." Infrai runs both via the same key and base URL, so the ops boundary stays small.
+**Options considered.** Pinecone or Weaviate plus a separate embedder adds another account and credential to a modest service. Keyword search is simpler, yet "frost at the door" should still hit "replace freezer gasket." Infrai supplies both ops through the same key and base URL, smaller operational boundary here.
 
-**Trade-offs.** The app decides re-index timing and which metadata is exposed. It also locks the embedding model per collection since dimensions must match. This sample indexes synchronously and treats photo content as a description from the work-order system. Image analysis and event ingestion are out of scope.
+**Trade-offs.** The app chooses when to re-index and which metadata to expose. It pins the embedding model per collection because dimensions must stay fixed. This sample indexes synchronously and treats photo as a description from the work-order system; image analysis and durable event consumer are out of scope.
 
 ## Verify the decision locally
 
-Install with test extra:
+Install the package and its test extra:
 
 ```bash
 python -m pip install -e '.[test]'
 pytest -q
 ```
 
-Tests feed `freezer gasket repair` and expect `WO-1042`, with follow-up `Replace gasket`. They check that photo description, dispatch status, and tech follow-up all land in the indexed text. No API key or network needed for this check.
+The focused tests use the input `freezer gasket repair` and expect `WO-1042`, whose follow-up says `Replace gasket`. They also assert photo description, dispatch status, tech follow-up all enter indexed text. No API key or network call for this deterministic check.
 
 ## Configuration
 
-`INFRAI_API_KEY` is required. `INFRAI_COLLECTION` defaults to `fieldservice-work-orders`, and `INFRAI_EMBEDDING_MODEL` defaults to `text-embedding-3-small`. Collection dimension comes from the first embedding at seed time, so setup tracks the model.
+`INFRAI_API_KEY` is required. `INFRAI_COLLECTION` defaults to `fieldservice-work-orders`, and `INFRAI_EMBEDDING_MODEL` defaults to `text-embedding-3-small`. Collection dimension derives from first embedding at seed, keeping setup aligned with the model.
 
 ## Production notes: Fieldservice Work Order Search Semantic Search Fieldservice
 
-The code is kept simple by design. Before going live, check the following for Fieldservice Work Order Search Semantic Search Fieldservice.
+I keep the code deliberately simple. Here's what to set before live: details below apply to Fieldservice Work Order Search Semantic Search Fieldservice.
 
 **Account & key**
 
